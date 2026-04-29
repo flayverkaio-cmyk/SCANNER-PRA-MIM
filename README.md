@@ -1,7 +1,6 @@
 local Players         = game:GetService("Players")
 local Workspace       = game:GetService("Workspace")
 local HttpService     = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
 local RS              = game:GetService("ReplicatedStorage")
 local vim             = game:GetService("VirtualInputManager")
 
@@ -9,10 +8,8 @@ vim:SendKeyEvent(true, Enum.KeyCode.F9, false, game)
 task.wait()
 vim:SendKeyEvent(false, Enum.KeyCode.F9, false, game)
 
--- ==================== MULTI-INSTÂNCIA COM JOB ID DIFERENTE ====================
 local ACCOUNT_SLOT = 1
 local DELAY_OFFSET = (ACCOUNT_SLOT - 1) * 9
-local STOP_HOP = false
 
 print("==============================================")
 print("Players: " .. tostring(#Players:GetPlayers()))
@@ -20,7 +17,6 @@ print("[MULTI] Slot: " .. ACCOUNT_SLOT .. " | Delay: " .. DELAY_OFFSET .. "s")
 print("[JOB ID] Atual: " .. tostring(game.JobId))
 print("==============================================")
 
--- CONFIGURAÇÕES - WEBHOOKS
 local WEBHOOK_10_50M    = "https://discord.com/api/webhooks/1496522548110954518/HhCLxHmrgDr2H_HxG6P7A7y3fzK-f5dLKYU6Jhf26jMeXB3ShGeTvzJI13d8lfCveSaB"
 local WEBHOOK_50_100M   = "https://discord.com/api/webhooks/1496622963565527040/v_nE4wvICouq54bCd0pPkEoUcp_M9SO7gMklkvdOb3sPbQlQZVsEUUPt4JTDZ5ODrVY4"
 local WEBHOOK_100_400M  = "https://discord.com/api/webhooks/1496623426519957657/uqSPorJxQT9sAk5sSQMqhsojMZitvcJwmg8CcMl7sUK4vISyz_cDUviBT-pD55ZjT4S9"
@@ -32,18 +28,15 @@ local WEBHOOK_MID = "https://discord.com/api/webhooks/1493387992323063828/O3QODF
 local WEBHOOK_HIGH = "https://discord.com/api/webhooks/1493358240795332730/2BSz6yuGDV38-PwEhTRacVDAUAmc4RUraRXA6pWROKM82Qk06YIudn3zZcsnsf4E4Umu"
 local WEBHOOK_ULTRA = "https://discord.com/api/webhooks/1493388375955083355/SlAQGYkYb7vIV6wX7gS_FWmr9-CbjnWK9SCy93jFgkZM-nU4yE6iEfX-HUGGFS4mZun6"
 
--- FIREBASE
 local FIREBASE_URL = "https://notify-f6091-default-rtdb.firebaseio.com/"
 
 local TARGET_NAMES = {""}
 local BLACK_NAMES = {"Fishboard", ""}
 local MIN_VALUE = 1e6
 local NOTIFIER_NAME = "canelloni notify"
-local MIN_VALUE_TO_STOP = 20e6
 
 local CURRENT_JOB = tostring(game.JobId)
 local PLACE_ID = game.PlaceId
-local MAX_ENTRIES = 15
 
 local http_request = (syn and syn.request) or (http and http.request) or http_request or request
 
@@ -51,49 +44,19 @@ local Synchronizer = nil
 local AnimalsData = nil
 local AnimalsShared = nil
 
--- ==================== CARREGAMENTO DE MÓDULOS COM ERRO TRATADO ====================
 do
     local function tryLoad(parent, name)
-        local ok, result = pcall(function()
-            local child = parent:WaitForChild(name, 5)
-            if not child then return nil end
-            return require(child)
-        end)
-        if not ok then
-            print("[⚠️] Falha ao carregar módulo: " .. name .. " - " .. tostring(result))
-            return nil
-        end
-        return result
+        local ok, result = pcall(function() return require(parent:WaitForChild(name, 5)) end)
+        return ok and result or nil
     end
-    
-    print("[📦] Carregando módulos...")
     local ok_pkg, Packages = pcall(function() return RS:WaitForChild("Packages", 5) end)
     local ok_dat, Datas = pcall(function() return RS:WaitForChild("Datas", 5) end)
     local ok_sh, Shared = pcall(function() return RS:WaitForChild("Shared", 5) end)
-    
-    if ok_pkg and Packages then
-        Synchronizer = tryLoad(Packages, "Synchronizer")
-        print("[✅] Synchronizer: " .. (Synchronizer and "Carregado" or "FALHOU"))
-    else
-        print("[❌] Packages não encontrado")
-    end
-    
-    if ok_dat and Datas then
-        AnimalsData = tryLoad(Datas, "Animals")
-        print("[✅] AnimalsData: " .. (AnimalsData and "Carregado" or "FALHOU"))
-    else
-        print("[❌] Datas não encontrado")
-    end
-    
-    if ok_sh and Shared then
-        AnimalsShared = tryLoad(Shared, "Animals")
-        print("[✅] AnimalsShared: " .. (AnimalsShared and "Carregado" or "FALHOU"))
-    else
-        print("[❌] Shared não encontrado")
-    end
+    if ok_pkg and Packages then Synchronizer = tryLoad(Packages, "Synchronizer") end
+    if ok_dat and Datas then AnimalsData = tryLoad(Datas, "Animals") end
+    if ok_sh and Shared then AnimalsShared = tryLoad(Shared, "Animals") end
 end
 
--- Funções básicas
 local function parseValue(text)
     if not text then return 0 end
     local clean = tostring(text):gsub("[%$%s%,%/s%/m%/h]", "")
@@ -114,10 +77,8 @@ end
 
 local function sendToFirebase(data)
     if not FIREBASE_URL or FIREBASE_URL == "" then return end
-    
     local timestamp = os.time()
     local uniqueId = tostring(timestamp) .. "_" .. tostring(math.random(10000, 99999))
-    
     local firebaseData = {
         jobId = data.jobId or CURRENT_JOB,
         name = data.name or "Unknown",
@@ -129,9 +90,7 @@ local function sendToFirebase(data)
         slot = ACCOUNT_SLOT,
         placeId = PLACE_ID
     }
-    
     local url = FIREBASE_URL .. "scans/" .. uniqueId .. ".json"
-    
     pcall(function()
         local response = http_request({
             Url = url,
@@ -139,7 +98,6 @@ local function sendToFirebase(data)
             Headers = {["Content-Type"] = "application/json"},
             Body = HttpService:JSONEncode(firebaseData)
         })
-        
         if response and response.StatusCode == 200 then
             print("[Firebase] ✅ Dados enviados com sucesso! ID: " .. uniqueId)
         else
@@ -159,7 +117,6 @@ local function isIgnoredText(text)
 end
 
 local function isBlacklisted(itemName)
-    if not itemName then return false end
     local low = itemName:lower()
     for _, b in ipairs(BLACK_NAMES) do
         if b ~= "" and low:find(b:lower()) then return true end
@@ -168,7 +125,6 @@ local function isBlacklisted(itemName)
 end
 
 local function isTargeted(itemName)
-    if not itemName then return false end
     local low = itemName:lower()
     for _, t in ipairs(TARGET_NAMES) do
         if t ~= "" and low:find(t:lower()) then return true end
@@ -194,18 +150,9 @@ end
 
 local function scan()
     local items = {}
-    
-    -- Verifica se o módulo foi carregado
-    if not Synchronizer then
-        print("[⚠️] Synchronizer não carregado! Abortando scan.")
-        return nil
-    end
-    
     local bestRejectedName = nil
     local bestRejectedValue = -1
-    
     local function tryInsert(itemName, val, ownerName)
-        if not itemName then return end
         if isBlacklisted(itemName) then return end
         if val >= MIN_VALUE or isTargeted(itemName) then
             table.insert(items, {name = itemName, value = val, owner = ownerName or "?"})
@@ -214,72 +161,52 @@ local function scan()
             bestRejectedName = itemName
         end
     end
-    
-    local plots = Workspace:FindFirstChild("Plots")
-    if not plots then
-        print("[⚠️] Plots não encontrado no Workspace")
-        return nil
-    end
-    
-    for _, plot in ipairs(plots:GetChildren()) do
-        pcall(function()
-            local channel = Synchronizer:Get(plot.Name)
-            if not channel then return end
-            
-            local animalList = channel:Get("AnimalList")
-            if not animalList then return end
-            
-            local ownerName = resolveOwnerName(channel:Get("Owner")) or "?"
-            
-            for _, animalData in pairs(animalList) do
-                if type(animalData) ~= "table" then continue end
-                
-                local animalIndex = animalData.Index
-                if not animalIndex then continue end
-                
-                local itemName = animalIndex
-                if AnimalsData then
-                    local info = AnimalsData[animalIndex]
-                    if info and info.DisplayName then
-                        itemName = info.DisplayName
+    if Synchronizer then
+        local plots = Workspace:FindFirstChild("Plots")
+        if plots then
+            for _, plot in ipairs(plots:GetChildren()) do
+                pcall(function()
+                    local channel = Synchronizer:Get(plot.Name)
+                    if not channel then return end
+                    local animalList = channel:Get("AnimalList")
+                    if not animalList then return end
+                    local ownerName = resolveOwnerName(channel:Get("Owner")) or "?"
+                    for _, animalData in pairs(animalList) do
+                        if type(animalData) ~= "table" then continue end
+                        local animalIndex = animalData.Index
+                        if not animalIndex then continue end
+                        local itemName = animalIndex
+                        if AnimalsData then
+                            local info = AnimalsData[animalIndex]
+                            if info and info.DisplayName then itemName = info.DisplayName end
+                        end
+                        local val = 0
+                        if AnimalsShared then
+                            local okG, gen = pcall(function() return AnimalsShared:GetGeneration(animalIndex, animalData.Mutation, animalData.Traits, nil) end)
+                            if okG and type(gen) == "number" then val = gen end
+                        end
+                        tryInsert(itemName, val, ownerName)
                     end
-                end
-                
-                local val = 0
-                if AnimalsShared and type(AnimalsShared.GetGeneration) == "function" then
-                    local okG, gen = pcall(function() 
-                        return AnimalsShared:GetGeneration(animalIndex, animalData.Mutation, animalData.Traits, nil) 
-                    end)
-                    if okG and type(gen) == "number" then 
-                        val = gen 
-                    end
-                end
-                
-                tryInsert(itemName, val, ownerName)
+                end)
             end
-        end)
+        end
     end
-    
     if #items == 0 then return nil end
-    
     table.sort(items, function(a, b) return a.value > b.value end)
     local best = items[1]
     local bestOwner = best.owner
     local listText = ""
     local listCount = 0
-    
     for _, it in ipairs(items) do
         if it.owner == bestOwner and listCount < 5 then
             listText = listText .. "1x " .. it.name .. " ($" .. formatValue(it.value) .. "/s)\n"
             listCount = listCount + 1
         end
     end
-    
     return best.name, best.value, listText, bestOwner
 end
 
 local function getBrainrotImage(name)
-    if not name then return nil end
     local ok, result = pcall(function()
         local url = "https://stealabrainrot.fandom.com/api.php?action=query&titles=" .. HttpService:UrlEncode(name) .. "&prop=pageimages&piprop=original&format=json"
         local resp = http_request({Url = url, Method = "GET"})
@@ -291,13 +218,6 @@ local function getBrainrotImage(name)
         end
     end)
     return ok and result or nil
-end
-
-local function getMutationPrefix(mutation)
-    if not mutation then return "" end
-    local m = mutation:lower()
-    if m == "" or m == "none" or m == "default" then return "" end
-    return "[" .. mutation:upper() .. "] "
 end
 
 local function getWebhookByValue(value)
@@ -316,14 +236,12 @@ end
 
 local function sendWebhook(url, name, value, list, showFields, footer, ownerName)
     if not url or url == "" then return end
-    if not name then return end
-    
     local imageUrl = getBrainrotImage(name)
     local joinLink = "https://liphyrdev.github.io/notifier/?placeId=" .. PLACE_ID .. "&gameInstanceId=" .. CURRENT_JOB
 
     local embed = {
         title = "1x " .. name .. " $" .. formatValue(value) .. "/s",
-        description = "**Brainrots:**\n```" .. (list or "Nenhum") .. "```",
+        description = "**Brainrots:**\n```" .. (list or "") .. "```",
         color = 0xFFD700,
         thumbnail = imageUrl and {url = imageUrl} or nil,
         footer = {text = footer or "canelloni notify"},
@@ -351,10 +269,9 @@ end
 -- ==================== SCAN ====================
 print("[Scan] Buscando brainrot bom...")
 local name, value, list, ownerName = scan()
-
 if name then
     print("✅ ENCONTRADO: " .. name .. " | $" .. formatValue(value) .. "/s")
-    
+
     local firebaseData = {
         jobId = CURRENT_JOB,
         name = name,
@@ -365,7 +282,7 @@ if name then
         players = #Players:GetPlayers()
     }
     sendToFirebase(firebaseData)
-    
+
     local webhookUrl, tierLabel = getWebhookByValue(value)
     sendWebhook(webhookUrl, name, value, list, true, tierLabel, ownerName)
 
@@ -376,102 +293,6 @@ if name then
     elseif value >= 10e6 then
         sendWebhook(WEBHOOK_MID, name, value, list, false, "canelloni notify MidLights")
     end
-    
-    if value >= MIN_VALUE_TO_STOP then
-        print("🛑 🛑 🛑 BRAINROT ENCONTRADO ACIMA DE 20M! 🛑 🛑 🛑")
-        print("📍 " .. name .. " - " .. formatValue(value))
-        print("PARANDO HOP...")
-        STOP_HOP = true
-    end
 else
     print("[Scan] Nenhum brainrot bom encontrado.")
 end
-
--- ==================== COUNTDOWN 6 SEGUNDOS ====================
-print("[Hop] Aguardando 6 segundos antes de iniciar o hop...")
-for i = 6, 1, -1 do
-    print("[Hop] Iniciando em " .. i .. " segundos... (Slot " .. ACCOUNT_SLOT .. ")")
-    task.wait(1)
-end
-print("[Hop] INICIANDO AGORA - Slot " .. ACCOUNT_SLOT)
-
--- ==================== HOP COM JOB ID DIFERENTE FORTE ====================
-local MAX_PLAYERS = 6
-local MAX_PING = 150
-local HOP_WAIT = 8
-local visitedJobs = { [CURRENT_JOB] = true }
-local lp = Players.LocalPlayer
-
-math.randomseed(os.time() + ACCOUNT_SLOT * 987654321 + ACCOUNT_SLOT * 123456789)
-
-local function getNewJobId()
-    local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", PLACE_ID)
-    local ok, res = pcall(function() return http_request({Url = url, Method = "GET", Headers = {["Accept"] = "application/json"}}) end)
-    if not ok or not res then return nil end
-
-    local data
-    pcall(function() data = HttpService:JSONDecode(res.Body) end)
-    if not data or not data.data then return nil end
-
-    local filtered = {}
-    for _, srv in ipairs(data.data) do
-        local players = tonumber(srv.playing) or 0
-        local ping = tonumber(srv.ping) or 999
-        if players <= MAX_PLAYERS and ping <= MAX_PING then
-            table.insert(filtered, srv)
-        end
-    end
-
-    if #filtered == 0 then
-        for _, srv in ipairs(data.data) do
-            if (tonumber(srv.playing) or 0) <= MAX_PLAYERS then
-                table.insert(filtered, srv)
-            end
-        end
-    end
-
-    for i = #filtered, 2, -1 do
-        local j = math.random(i)
-        filtered[i], filtered[j] = filtered[j], filtered[i]
-    end
-
-    table.sort(filtered, function(a, b)
-        return (tonumber(a.playing) or 0) < (tonumber(b.playing) or 0)
-    end)
-
-    for _, srv in ipairs(filtered) do
-        local jid = tostring(srv.id or "")
-        if jid ~= "" and jid ~= CURRENT_JOB and not visitedJobs[jid] then
-            visitedJobs[jid] = true
-            print("[Hop] Slot " .. ACCOUNT_SLOT .. " → Novo Job ID: " .. jid)
-            return jid
-        end
-    end
-
-    print("[Hop] Slot " .. ACCOUNT_SLOT .. " - Resetando lista de jobs...")
-    visitedJobs = { [CURRENT_JOB] = true }
-    return nil
-end
-
-local function serverHop()
-    task.spawn(function()
-        while true do
-            if STOP_HOP then
-                print("🎯 HOP PARADO! Aguardando na instância atual...")
-                break
-            end
-            
-            local newJobId = getNewJobId()
-            if newJobId then
-                print("[Hop] Slot " .. ACCOUNT_SLOT .. " Teleportando para Job ID: " .. newJobId)
-                pcall(function() TeleportService:TeleportToPlaceInstance(PLACE_ID, newJobId, lp) end)
-            else
-                print("[Hop] Slot " .. ACCOUNT_SLOT .. " - Aguardando e tentando novamente...")
-                task.wait(5)
-            end
-            task.wait(HOP_WAIT + math.random(3,7))
-        end
-    end)
-end
-
-serverHop()
